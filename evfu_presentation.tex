@@ -1,5 +1,5 @@
 % E-VFU: Multi-Attack Verification Framework for Vertical Federated Unlearning
-% CSE-472 | Place this .tex in the same folder as the "presentation_figures" directory
+% CSE-472 | Place .tex in same folder as "presentation_figures/"
 \documentclass[11pt,aspectratio=169]{beamer}
 \usetheme{Madrid}
 \usecolortheme{default}
@@ -10,12 +10,12 @@
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage{multirow}
 
-% Figures folder (run notebook first to generate presentation_figures/)
 \graphicspath{{./presentation_figures/}{./}}
 
 %-------------------------------------------------------------------------------
-\title{E-VFU: Multi-Attack Verification Framework for Vertical Federated Unlearning}
+\title{E-VFU: A Multi-Attack Verification Framework for Vertical Federated Unlearning}
 \subtitle{CSE-472 Project}
 \author{ID: 2005030 \quad ID: 2005034}
 \institute{}
@@ -37,153 +37,233 @@
 %===============================================================================
 \section{Background \& Problem}
 
-\begin{frame}{Background: Vertical Federated Learning (VFL)}
+\begin{frame}{What is Vertical Federated Learning (VFL)?}
   \begin{itemize}
-    \item \textbf{VFL}: Different parties hold different \textbf{features} (columns) of the same entities.
-    \item Used in healthcare, finance, cross-institutional analytics.
-    \item \textbf{Right to erasure}: Data must be removable from trained ML models.
-    \item \textbf{Unlearning} in VFL = removing a client, feature, or sample from the model.
+    \item In \textbf{horizontal} FL: each party has \emph{different samples} (rows) but same feature set.
+    \item In \textbf{vertical} FL: each party has \emph{different features} (columns) for the \textbf{same entities} (e.g., same users, same patients).
   \end{itemize}
-  \vspace{0.8em}
-  \begin{block}{Varshney et al. (PETS 2025)}
-    First knowledge-distillation based feature unlearning (VFU-KD) for VFL.
+  \vspace{0.5em}
+  \begin{block}{Example}
+    Party A (hospital) has vitals and diagnoses; Party B (lab) has blood tests. Same patient ID, different columns. They train one model by sharing only \textbf{embeddings} or gradients, not raw data.
   \end{block}
+  \vspace{0.5em}
+  Used in healthcare, finance, and cross-institutional analytics where data cannot be centralized.
+\end{frame}
+
+\begin{frame}{Why Unlearning in VFL?}
+  \begin{enumerate}
+    \item \textbf{Right to erasure} (GDPR, etc.): A user can request that their data be removed not only from databases but also from any \emph{model trained on it}.
+    \item In VFL, ``removing data'' can mean:
+      \begin{itemize}
+        \item removing a \textbf{client} (one party leaves),
+        \item removing a \textbf{feature} (one column must no longer influence the model),
+        \item or removing specific \textbf{samples} (rows).
+      \end{itemize}
+    \item Simply retraining from scratch is expensive; we need \textbf{unlearning} methods that update the model without full retraining.
+  \end{enumerate}
+  \vspace{0.5em}
+  \textbf{Challenge:} How do we know unlearning actually worked? We need \textbf{verification}.
+\end{frame}
+
+\begin{frame}{Base Work: Varshney et al. (PETS 2025)}
+  \begin{itemize}
+    \item First \textbf{feature-level} unlearning methods for VFL: \textbf{VFU-KD} (knowledge distillation) and \textbf{VFU-GA} (gradient ascent).
+    \item Idea: active party retrains (e.g., student mimics teacher on \emph{retain set only}, or gradient ascent on target samples); passive parties may freeze encoders.
+    \item They evaluate unlearning using \textbf{output-logit membership inference}: can an attacker tell if a sample was in the training set by looking at model predictions?
+  \end{itemize}
+  \vspace{0.5em}
+  \begin{alertblock}{Limitation}
+    Output-only MIA is \textbf{weak}. Recent work (EMNLP 2025) shows that stronger, unlearning-specific MIA can reach $\sim$99\% accuracy even when standard metrics suggest ``successful'' unlearning. So we need \textbf{stronger verification}.
+  \end{alertblock}
 \end{frame}
 
 \begin{frame}{Problem: Verification Gaps}
   \begin{enumerate}
-    \item \textbf{Output-logit only MIA} is weak (EMNLP 2025: $\sim$99\% MIA despite ``successful'' unlearning).
-    \item No \textbf{feature entanglement} analysis.
-    \item No \textbf{communication cost} analysis (SMPC/SecAgg).
-    \item \textbf{Single-shot} unlearning only.
+    \item \textbf{Weak MIA}: Relying only on output logits misses leakage in gradients and internal representations.
+    \item \textbf{No feature entanglement}: If features are correlated, removing one may still leave traces in other parties' encodings; no analysis in prior work.
+    \item \textbf{No communication cost}: Overhead of unlearning in secure aggregation (SMPC/SecAgg) is unstudied.
+    \item \textbf{Single-shot only}: No evaluation of repeated unlearning requests (iterative setting).
   \end{enumerate}
-  \vspace{0.8em}
-  \begin{alertblock}{Goal}
-    Strengthen \textbf{verification} of VFL unlearning with stronger attacks and clear success criteria.
-  \end{alertblock}
+  \vspace{0.5em}
+  \textbf{E-VFU} focuses on (1): we add \textbf{stronger adversarial verification} so we can rigorously check whether unlearning really removed the target data.
 \end{frame}
 
 %===============================================================================
 \section{Our Approach: E-VFU}
 
-\begin{frame}{E-VFU Overview}
-  \begin{block}{Phase 0}
-    Base: VFL model, training, unlearning (VFU-GA / VFU-KD), baseline output MIA.
+\begin{frame}{E-VFU in One Slide}
+  \begin{block}{What is E-VFU?}
+    \textbf{Enhanced Vertical Federated Unlearning}: a \textbf{verification framework} that audits Varshney et al.'s VFU-KD/VFU-GA using four complementary checks. We do \emph{not} propose a new unlearning algorithm; we propose \emph{better ways to test} if unlearning worked.
   \end{block}
-  \vspace{0.6em}
-  \begin{block}{Phase 1: Robust Verification}
-    Four adversarial checks to audit whether unlearning really removed target data:
-    \begin{enumerate}
-      \item Output MIA (baseline)
-      \item Gradient-based MIA
-      \item FUMA (Forensic Unlearning Membership Attack)
-      \item Shadow model attack
-    \end{enumerate}
+  \vspace{0.5em}
+  \begin{block}{Phase 0 (base)}
+    We use the same base as the paper: VFL model (bottom encoders per party + top fusion), training, and unlearning (e.g., gradient ascent on target samples). We also keep \textbf{output-based MIA} as a \textbf{baseline}.
   \end{block}
-  \vspace{0.6em}
-  \textbf{Pass} $\Rightarrow$ VFU-KD verified. \textbf{Fail} $\Rightarrow$ limitations exposed.
+  \vspace{0.5em}
+  \begin{block}{Phase 1 (robust verification)}
+    We run \textbf{four} verification attacks. If all pass $\Rightarrow$ VFU unlearning is robust. If any fails $\Rightarrow$ we have evidence of remaining leakage.
+  \end{block}
 \end{frame}
 
-\begin{frame}{Phase 1 — Success Criteria}
+\begin{frame}{Phase 1 — The Four Verification Components}
+  \begin{enumerate}
+    \item \textbf{Output MIA (baseline)}: Attacker uses prediction confidence/loss to guess membership. \emph{Target:} AUC $\approx$ 0.5 on unlearned samples (cannot distinguish from non-members).
+    \item \textbf{Gradient-based MIA}: Attacker uses \emph{gradient} norms and spectral features to guess membership. Stronger than output-only. \emph{Target:} AUC $\approx$ 0.5; we also report gradient change $\|g_{\text{before}}\| - \|g_{\text{after}}\|$.
+    \item \textbf{FUMA}: Forensic Unlearning Membership Attack — use \emph{canary} samples and prediction divergence $\Delta_{\text{pred}}$ to detect unlearning artifacts. \emph{Target:} detection rate $<$ 5\%.
+    \item \textbf{Shadow model attack}: Train shadow models on retain-only vs full data; meta-classifier predicts which dataset a model came from. \emph{Target:} unlearned model classified as retain-only (P(full data) $<$ 0.5).
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Why These Four?}
+  \begin{itemize}
+    \item \textbf{Output MIA}: Standard baseline (Varshney et al.); easy to compare.
+    \item \textbf{Gradient MIA}: Gradients reveal more than logits (Geiping et al.); if unlearning is real, gradient response to unlearned samples should change.
+    \item \textbf{FUMA}: Unlearning can leave \emph{behavioral} traces (e.g., sensitivity to canaries); FUMA checks that such traces are gone.
+    \item \textbf{Shadow attack}: Checks the \emph{whole model}, not per-sample membership — is the unlearned model statistically indistinguishable from a model that never saw the target data?
+  \end{itemize}
+  \vspace{0.5em}
+  Together they cover: \emph{outputs}, \emph{gradients}, \emph{behavior on probes}, and \emph{model-level fingerprint}.
+\end{frame}
+
+\begin{frame}{Phase 1 — Success Criteria (Summary Table)}
   \begin{center}
     \small
-    \begin{tabular}{@{}lll@{}}
+    \begin{tabular}{@{}p{3.2cm}p{3.2cm}p{3.8cm}@{}}
       \toprule
-      \textbf{Component} & \textbf{Metric} & \textbf{Target} \\
+      \textbf{Component} & \textbf{Metric} & \textbf{Interpretation} \\
       \midrule
-      Output MIA & AUC & $\approx$ 0.5 \\
-      Gradient MIA & AUC & $\approx$ 0.5 \\
-      & Unlearning effectiveness & $\geq$ 50\% \\
-      FUMA & Detection rate & $<$ 5\% \\
-      Shadow model & P(full data) after unlearning & $<$ 0.5 \\
+      Output MIA & AUC on unlearned samples & $\approx$ 0.5 $\Rightarrow$ attacker cannot tell member from non-member \\
+      Gradient MIA & AUC; gradient change & $\approx$ 0.5 and large gradient change $\Rightarrow$ gradient signature of target data removed \\
+      & Unlearning effectiveness & $\geq$ 50\% $\Rightarrow$ unlearned samples look like non-members \\
+      FUMA & Detection rate & $<$ 5\% $\Rightarrow$ forensic traces minimal \\
+      Shadow model & P(full data) for unlearned model & $<$ 0.5 $\Rightarrow$ model looks like retain-only \\
       \bottomrule
     \end{tabular}
   \end{center}
-  \vspace{0.8em}
-  Each figure in the next section shows one of these metrics.
+  \vspace{0.5em}
+  In the following slides we show \textbf{experimental results} for each component and then the combined dashboard.
+\end{frame}
+
+%===============================================================================
+\section{Experimental Setup}
+
+\begin{frame}{Experimental Setup}
+  \begin{itemize}
+    \item \textbf{Datasets}: UCI Adult (income prediction, $\sim$32K samples), German Credit (credit risk, 1K); optional MIMIC-III (healthcare, 46K).
+    \item \textbf{VFL}: Data split by \textbf{features} across 2 (or 3) parties; one active party holds labels.
+    \item \textbf{Model}: Bottom MLPs per party $\to$ embeddings $\to$ top fusion MLP $\to$ binary prediction.
+    \item \textbf{Unlearning}: We use \textbf{VFU-GA} (gradient ascent on target samples for a fixed number of epochs, e.g., 10). A fraction (e.g., 5\%) of training samples are selected as ``target'' to unlearn.
+    \item \textbf{Verification}: After unlearning, we run all four Phase 1 attacks and compare metrics to the criteria above.
+  \end{itemize}
 \end{frame}
 
 %===============================================================================
 \section{Results — Figures}
 
-\begin{frame}{Training (UCI Adult)}
+\begin{frame}{Result 1: Training Curves (Before Unlearning)}
   \begin{center}
-    \includegraphics[width=0.85\textwidth]{08_training_history_adult.png}
+    \includegraphics[width=0.82\textwidth]{08_training_history_adult.png}
   \end{center}
-  \vspace{0.3em}
-  \footnotesize Training loss, validation accuracy/F1, and AUC before unlearning.
+  \vspace{0.4em}
+  \footnotesize
+  \textbf{What this shows:} Training loss and validation accuracy/F1/AUC on UCI Adult. The model is trained normally first; only after that do we perform unlearning and then run the verification attacks. Stable validation performance indicates a reasonable base model.
 \end{frame}
 
-\begin{frame}{Gradient MIA vs Output MIA}
+\begin{frame}{Result 2: Gradient MIA vs Output MIA}
   \begin{center}
-    \includegraphics[width=0.95\textwidth]{01_gradient_mia_comparison.png}
+    \includegraphics[width=0.92\textwidth]{01_gradient_mia_comparison.png}
   \end{center}
-  \vspace{0.3em}
-  \footnotesize \textbf{Left:} Attack AUC (target $\approx$ 0.5). \textbf{Center:} Unlearning effectiveness (target $\geq$ 50\%). \textbf{Right:} Gradient change magnitude after unlearning.
+  \vspace{0.4em}
+  \footnotesize
+  \textbf{Left:} Attack AUC for output-based vs gradient-based MIA. Near 0.5 means the attacker cannot distinguish members from non-members (good for privacy). \textbf{Center:} Unlearning effectiveness (higher = unlearned samples look more like non-members). \textbf{Right:} Distribution of gradient change magnitude per sample after unlearning; large change indicates the model's gradient response to those samples has shifted (consistent with unlearning).
 \end{frame}
 
-\begin{frame}{Gradient Feature Importance (MIA)}
+\begin{frame}{Result 3: Which Gradient Features Matter for MIA?}
   \begin{center}
-    \includegraphics[width=0.8\textwidth]{02_gradient_feature_importance.png}
+    \includegraphics[width=0.78\textwidth]{02_gradient_feature_importance.png}
   \end{center}
-  \vspace{0.3em}
-  \footnotesize Which gradient features drive membership inference (Random Forest importance).
+  \vspace{0.4em}
+  \footnotesize
+  \textbf{What this shows:} We extract many features from gradients (norms, layer-wise norms, spectral cues, etc.) and train a Random Forest for membership inference. This plot shows which features are most important. It helps explain \emph{why} gradient MIA can be stronger than output MIA and which aspects of the gradient signal leak membership.
 \end{frame}
 
-\begin{frame}{FUMA — Forensic Unlearning Membership Attack}
+\begin{frame}{Result 4: FUMA — Forensic Unlearning Membership Attack}
   \begin{center}
-    \includegraphics[width=0.9\textwidth]{03_fuma_results.png}
+    \includegraphics[width=0.88\textwidth]{03_fuma_results.png}
   \end{center}
-  \vspace{0.3em}
-  \footnotesize Canary divergence, FUMA feature importance, detection-rate gauge, unlearned vs retained forensic features. Target: detection rate $<$ 5\%.
+  \vspace{0.4em}
+  \footnotesize
+  \textbf{What this shows:} (1) Canary prediction divergence by type (extreme/boundary/interpolated). (2) Importance of forensic features (prediction change, gradient ratio, etc.) for detecting unlearned vs retained samples. (3) FUMA detection-rate gauge: target $<$ 5\%. (4) Comparison of mean forensic features for unlearned vs retained samples. If unlearning is effective, the detector should not be able to tell them apart (low detection rate).
 \end{frame}
 
-\begin{frame}{Baseline MIA Results}
+\begin{frame}{Result 5: Baseline (Output-Logit) MIA}
   \begin{center}
-    \includegraphics[width=0.85\textwidth]{04_mia_results.png}
+    \includegraphics[width=0.82\textwidth]{04_mia_results.png}
   \end{center}
-  \vspace{0.3em}
-  \footnotesize Output-logit MIA (Varshney et al. baseline) on members, non-members, and unlearned samples.
+  \vspace{0.4em}
+  \footnotesize
+  \textbf{What this shows:} Classical MIA using only model outputs (confidence, loss, distance to decision boundary). We evaluate on true members (retained), non-members (test set), and \emph{unlearned} samples. After successful unlearning, unlearned samples should behave like non-members (similar membership probability distribution). This is the baseline that Varshney et al. rely on; we compare it with the stronger gradient and FUMA attacks.
 \end{frame}
 
-\begin{frame}{Shadow Model Attack}
+\begin{frame}{Result 6: Shadow Model Attack}
   \begin{center}
-    \includegraphics[width=0.9\textwidth]{05_shadow_attack_results.png}
+    \includegraphics[width=0.88\textwidth]{05_shadow_attack_results.png}
   \end{center}
-  \vspace{0.3em}
-  \footnotesize P(full data) before/after unlearning; shadow model distribution; meta-classifier AUC. Target: unlearned model like retain-only (P(full) $<$ 0.5).
+  \vspace{0.4em}
+  \footnotesize
+  \textbf{What this shows:} We train several ``shadow'' models on retain-only data and several on full data. A meta-classifier learns to tell which type a model is (using parameter and behavioral features). We then ask: does the \emph{unlearned} model get classified as retain-only or full-data? If P(full data) drops below 0.5 after unlearning, the unlearned model is statistically closer to retain-only models — i.e., the target data's influence has been removed at the model level.
 \end{frame}
 
-\begin{frame}{Comprehensive Verification (Pass/Fail)}
+\begin{frame}{Result 7: Comprehensive Verification (All Metrics + Pass/Fail)}
   \begin{center}
-    \includegraphics[width=0.95\textwidth]{06_comprehensive_verification.png}
+    \includegraphics[width=0.92\textwidth]{06_comprehensive_verification.png}
   \end{center}
-  \vspace{0.3em}
-  \footnotesize All Phase 1 metrics and pass/fail summary in one place.
+  \vspace{0.4em}
+  \footnotesize
+  \textbf{What this shows:} All Phase 1 metrics in one place (left: bar chart of metric values with target reference). Right: pass/fail per attack. Green = pass (metric meets target), red = fail. This slide gives the overall verdict: how many of the four verification checks passed.
 \end{frame}
 
-\begin{frame}{Phase 1 Validation Dashboard}
+\begin{frame}{Result 8: Phase 1 Validation Dashboard}
   \begin{center}
-    \includegraphics[width=0.9\textwidth]{07_phase1_validation_dashboard.png}
+    \includegraphics[width=0.88\textwidth]{07_phase1_validation_dashboard.png}
   \end{center}
-  \vspace{0.3em}
-  \footnotesize Single dashboard: MIA AUCs, unlearning effectiveness, FUMA detection rate, Shadow P(full). Green = pass, red = fail.
+  \vspace{0.4em}
+  \footnotesize
+  \textbf{What this shows:} Four panels: (1) Output \& Gradient MIA AUC, (2) Unlearning effectiveness, (3) FUMA detection rate, (4) Shadow P(full data). Each with target lines (e.g., 0.5, 5\%, 50\%). Green bars = pass, red = fail. Single-figure summary for the presentation and report.
 \end{frame}
 
 %===============================================================================
 \section{Conclusions}
 
-\begin{frame}{Conclusions}
+\begin{frame}{What We Did}
   \begin{itemize}
-    \item E-VFU adds \textbf{multi-attack verification} (Phase 1) on top of VFU-KD.
-    \item \textbf{Four checks}: output MIA, gradient MIA, FUMA, shadow model — each with a clear success criterion.
-    \item All figures are saved \textbf{separately} in \texttt{presentation\_figures/} for easy inclusion in slides.
-    \item If verification passes $\Rightarrow$ VFU-KD is robust; if it fails $\Rightarrow$ limitations are exposed.
+    \item We implemented \textbf{Phase 0} (VFL model, training, VFU-GA unlearning) and \textbf{Phase 1} (four verification attacks) as in the E-VFU proposal.
+    \item We compared \textbf{output-based MIA} (baseline) with \textbf{gradient-based MIA}, and added \textbf{FUMA} and \textbf{shadow model} verification.
+    \item Each attack has a clear \textbf{success criterion}; we report whether unlearning passes or fails each check.
+    \item All plots are saved separately in \texttt{presentation\_figures/} (numbered 01--08) for easy inclusion in reports and slides.
   \end{itemize}
-  \vspace{0.8em}
-  \begin{block}{Deliverables}
-    Notebook (Phase 0 + Phase 1), \texttt{presentation\_figures/} (8 PNGs), this presentation.
+\end{frame}
+
+\begin{frame}{Interpretation \& Takeaway}
+  \begin{block}{If verification passes (all four checks)}
+    E-VFU provides evidence that Varshney et al.'s VFU unlearning \textbf{removes} the target data's influence from the model, not only in terms of output logits but also in gradients, forensic behavior, and model-level statistics. The baseline (output MIA) alone would be insufficient to conclude this.
   \end{block}
+  \vspace{0.5em}
+  \begin{block}{If verification fails (one or more checks)}
+    E-VFU \textbf{reveals limitations}: some trace of the target data remains (e.g., in gradients or in the shadow classifier's view). That motivates stronger unlearning methods or more epochs, and shows the value of multi-attack verification.
+  \end{block}
+  \vspace{0.5em}
+  \textbf{Bottom line:} Stronger verification leads to more reliable conclusions about whether unlearning actually worked.
+\end{frame}
+
+\begin{frame}{Deliverables \& References}
+  \begin{itemize}
+    \item \textbf{Jupyter notebook}: Phase 0 (train, unlearn) + Phase 1 (all four attacks, visualizations).
+    \item \textbf{presentation\_figures/}: 8 PNGs (01--08) for slides and report.
+    \item \textbf{This presentation}: Elaborated explanation and one slide per main result.
+  \end{itemize}
+  \vspace{0.5em}
+  \textbf{Key references:} Varshney et al. (PETS 2025) — VFU-KD/VFU-GA; Geiping et al. (2020) — gradient inversion; Shokri et al. — shadow models; EMNLP 2025 — unlearning-specific MIA.
 \end{frame}
 
 \begin{frame}{}

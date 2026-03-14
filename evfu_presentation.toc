@@ -1,0 +1,6 @@
+\beamer@sectionintoc {1}{Outline}{2}{0}{1}
+\beamer@sectionintoc {2}{Background \& Problem}{3}{0}{2}
+\beamer@sectionintoc {3}{Our Approach: E-VFU}{7}{0}{3}
+\beamer@sectionintoc {4}{Experimental Setup}{11}{0}{4}
+\beamer@sectionintoc {5}{Results — Figures}{12}{0}{5}
+\beamer@sectionintoc {6}{Conclusions}{20}{0}{6}
