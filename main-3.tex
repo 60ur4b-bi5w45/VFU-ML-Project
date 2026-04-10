@@ -1,0 +1,388 @@
+
+\documentclass[sigconf,nonacm]{acmart}
+
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{microtype}
+\begin{document}
+\sloppy
+\setlength{\emergencystretch}{2em}
+
+\title{E-VFU: A Multi-Attack Verification Framework for Vertical Federated Unlearning}
+
+\author{Fairuz Mubashwera}
+\affiliation{%
+  \institution{ID: 2005030}
+  \city{Dhaka}
+  \country{Bangladesh}
+  }
+
+  \author{Gourab Jit Biswas}
+\affiliation{%
+  \institution{ID: 2005034}
+  \city{Dhaka}
+  \country{Bangladesh}
+  }
+
+\begin{abstract}
+\textbf{Enhanced Vertical Federated Unlearning (E-VFU)} is a verification framework for \emph{vertical federated unlearning} (VFU) where parties jointly train over aligned sample IDs but disjoint feature silos. In this setting, unlearning can appear successful under weak audits (e.g., output-only membership tests) while leaving residual artifacts detectable under stronger probes. E-VFU instantiates \emph{multi-view verification} by combining four complementary audits: \textbf{(i)} output-based membership inference (Output-MIA), \textbf{(ii)} gradient-based membership inference (Grad-MIA), \textbf{(iii)} forensic unlearning membership attacks (FUMA) in two variants---a canary probe based on before/after prediction shifts and a learned detector over before/after feature differences---and \textbf{(iv)} a shadow-model \emph{meta} attack that classifies parameter fingerprints as ``full-data'' vs.\ ``retain-only''. We further report a cross-party \textbf{Jacobian--SVD entanglement} diagnostic that quantifies representation coupling via a concentration metric $\rho$, motivating entanglement-aware mitigation when a party leaves the federation.
+
+\end{abstract}
+
+
+\maketitle
+
+\section{Introduction}
+
+\subsection{Motivation}
+Machine learning systems trained on sensitive data increasingly face deletion mandates (e.g., right-to-erasure) and partner-exit constraints. While \emph{retraining from scratch} after removing requested data is the conceptual gold standard, it is often too costly to operationalize. Consequently, practical systems employ \emph{approximate unlearning}---limited updates intended to remove the influence of a forget subset---but such updates can leave residual traces. This motivates verification: \emph{how do we test that forgetting actually happened?}
+
+Verification is particularly underdeveloped in \emph{vertical} federated learning (VFL), where parties share sample IDs but hold disjoint feature blocks and only one party typically holds labels. Unlike horizontal FL, auditors cannot assume each client owns independent samples or has full feature access. As a result, VFU evaluations often reduce to a single output-based membership inference attack (MIA)~\cite{varshney2025vfu}, which can be insufficient. We propose E-VFU as a multi-attack verification framework that \emph{triangulates} forgetting quality using attacks that probe different observable surfaces: outputs, gradients, before/after behavioral forensics, and model-level fingerprints.
+
+\subsection{Problem Definition}
+
+In a vertical federated learning (VFL) setting, multiple parties share an identical set of users, while each party holds a distinct subset of features, and only one party possesses the corresponding labels. Within this framework, conventional verification methods designed for distributed unlearning systems are not directly applicable and therefore require careful redesign to suit the VFL context. Existing evaluation approaches for VFL unlearning algorithms are often overly simplistic, typically relying on one or two isolated techniques, which leads to an incomplete assessment.
+
+Adversarial verification is essential for validating distributed unlearning. However, in the VFL setting, current practices are limited to techniques such as logit-based membership inference attacks\cite{varshney2025vfu} or basic backdoor attacks\cite{yang2019federated}, which fail to provide comprehensive coverage of potential vulnerabilities.
+
+A more critical concern arises from the inherent structure of VFL: although user data is distributed across parties, it is collectively represented through partitioned features. Despite this, there is a lack of analysis on cross-party feature entanglement. This oversight significantly increases the risk of catastrophic failure following unlearning, particularly in terms of model utility and stability.
+
+
+
+
+\subsection{Literature review and research gap}
+\subsubsection{Vertical federated unlearning: }
+Vertical Federated unlearning trains models without centralizing raw features from every party~\cite{yang2019federated}. In VFL, Embeddings are exchanged, or other split-learning variants are used. Privacy risks include reconstruction from embeddings. The first unlearning methods of the Federated setup were SISA and FedEraser. They are still widely used. Beyond SISA and FedEraser, unlearning has been approached via influence functions, Fisher forgetting, and contrastive distillation~\cite{bourtoule2021sisa,guo2019certified}. Horizontal Federated unlearning systems often assume IID shards across clients; VFL instead couples parties through a shared alignment key (user ID) and a joint top model. The forgetting unit may be a column block (features), a row block (samples), or an entire passive party---each implying different communication patterns for mitigation. In VFL, recent work emphasizes certified removal and feature unlearning~\cite{wang2025certified,varshney2025vfu}. 
+
+
+
+\subsubsection{Adversarial attacks and unlearning evaluation: }
+Membership Inference Attacks remain a standard probe for whether ``forgotten'' samples remain distinguishable~\cite{shokri2017mia,salem2018ml_leaks}. But often in VFU settings, output-based MIAs are used. These attacks often use loss, margin, or entropy, which are not enough. Mostly, gradient-based attacks are required for careful generalization. \textbf{Shadow models}~\cite{shokri2017mia} motivate training auxiliary models and compare the unlearned model parameters with learned model parameters. This often works well when the model is less complex.\textbf{Forensics \& gradients.} FUMA is a gradient inversion-based attack that motivates analyzing gradients beyond outputs~\cite{geiping2020inverting}
+
+\subsubsection{Jacobian and spectral analyses}
+Neural network Jacobians often exhibit low-rank structure~\cite{oymak2019jacobian}; truncated SVD therefore summarizes dominant coupling directions. The $\rho$ ratio measures concentration of singular mass in the top singular direction, a simple scalar that can be tracked across unlearning methods.Spectral summaries have been used for generalization theory and for sensitivity regularization. This could explore whether Jacobian penalties applied during VFL training lower post-unlearning $\Delta\rho$ spikes, trading off raw accuracy for gentler unlearning trajectories.
+
+
+\subsubsection{Gap: }Prior works-
+\begin{itemize}[leftmargin=*]
+    \item {Audit unlearning with a \emph{single} MIA family, or backdoor attacks. No combined adversarial attack framework to evaluate a different aspects of a VFU algorithm}
+\end{itemize}
+\begin{itemize}[leftmargin=*]
+    \item {Analyze entanglement within the same party. No feature entanglement analysis, let alone cross-party feature entanglement analysis, is done.}
+\end{itemize}
+
+\subsection{Contributions}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Combined Adversarial Attack Framework:} A reproducible verification pipeline on two-party and four party VFL with (\textit{i})~\textbf{output-based MIA}; (\textit{ii})~\textbf{gradient-based MIA} with Random Forest on gradient features and gradient change metrics; (\textit{iii})~\textbf{FUMA}, a forensic detector with canary-based analysis and reported detection rate; (\textit{iv})~\textbf{shadow model attack}: $N$ shadow models per class, meta-classifier on parameter fingerprints.
+  
+  \item \textbf{Cross-party feature entanglement:} Four-party VFL with Jacobian--SVD $\rho$ diagnosis; party- and feature-level analyses; This entanglement-aware passive-party unlearning can save the unlearning method from catastrophic efficiency drop.
+
+\end{itemize}
+
+\section{Materials and Methods}
+\label{sec:methods}
+
+\subsection{Problem setup and learning objective}
+Let $\mathcal{D}=\{(x_n,y_n)\}_{n=1}^N$ denote labeled samples. In VFL with $K$ parties, each sample decomposes as $x_n=(x_n^{(0)},\ldots,x_n^{(K-1)})$ where $x_n^{(i)}\in\mathbb{R}^{d_i}$ is visible only to party $i$. Party $0$ holds labels $y_n\in\{0,1\}$. Each passive or active party $i$ parameterizes a bottom encoder $f_{\theta_i}:\mathbb{R}^{d_i}\to\mathbb{R}^{d_e}$ producing $e_{n,i}=f_{\theta_i}(x_n^{(i)})$. The active top model $g_{\theta_a}:\mathbb{R}^{K d_e}\to\mathbb{R}$ outputs logit $z_n = g_{\theta_a}(e_{n,0},\ldots,e_{n,K-1})$ and $\hat{y}_n=\sigma(z_n)$ under the logistic model. The empirical risk minimized during training is
+\begin{equation}
+  \mathcal{L}(\theta) \;=\; \frac{1}{|\mathcal{B}|}\sum_{n\in\mathcal{B}} \ell_{\mathrm{BCE}}(\hat{y}_n,y_n),
+  \qquad
+  \ell_{\mathrm{BCE}} = -\bigl( y_n \log \hat{y}_n + (1-y_n)\log(1-\hat{y}_n)\bigr).
+\end{equation}
+All parameters $\theta=\{\theta_0,\ldots,\theta_{K-1},\theta_a\}$ are updated by backpropagation through the concatenated graph. This joint optimization induces statistical coupling: gradients $\partial \mathcal{L}/\partial e_{n,i}$ depend on all parties' embeddings, so passive encoders co-adapt even though raw features never leave silos.
+
+For \textbf{sample unlearning}, fix a forget index set $\mathcal{I}_f\subset\{1,\ldots,N_{\mathrm{train}}\}$ and retain set $\mathcal{I}_r = \{1,\ldots,N_{\mathrm{train}}\}\setminus \mathcal{I}_f$. Ideal unlearning seeks parameters $\theta^\star$ such that (i)~predictions on $\mathcal{I}_r$ remain accurate, (ii)~information about samples in $\mathcal{I}_f$ is removed from $\theta^\star$ under a chosen threat model, and (iii)~downstream audits (MIAs) cannot distinguish forgotten samples from non-training points. Our experiments approximate (ii)--(iii) via optimization heuristics rather than exact indistinguishability.
+
+\subsection{Datasets}
+\textbf{UCI Adult}~\cite{kohavi1996adult}: $\sim$30{,}162 rows after removing missing values, 14 attributes, binary target income $>$50K. Class imbalance is skewed toward $\leq$50K.
+
+\textbf{German Credit}~\cite{hofmann1994german}: 1{,}000 rows, 20 attributes, binary credit risk. Smaller $n$ increases metric variance.
+
+\textbf{Bank Marketing} (UCI): $\sim$41{,}188 rows (after preprocessing in our code), tabular binary prediction of term-deposit subscription. 
+
+\textbf{Credit Card Default} (UCI): 30{,}000 rows, tabular binary prediction of default payment.
+
+\textbf{Preprocessing.} Categorical columns are label-encoded. Features are standardized per party after train/test split. We use an 80/20 stratified split where sklearn's \texttt{stratify} applies; random seed 42 throughout unless noted.
+
+\subsection{Vertical partitioning}
+\textbf{Two-party mode (Part~1):} Party~0 holds labels and half the features (by count); party~1 holds the remainder. \textbf{Four-party mode (Part~2--3):} Features are shuffled and split into four contiguous blocks; party~0 is active with labels. Example splits from Part~3 logs include Adult: party~0 (3 features), parties 1--3 (3, 3, 5 features); German: five features per party. The exact feature names per party are dataset-dependent and logged in the notebooks---random splits simulate siloed columns rather than domain-driven partitioning.
+
+\subsection{Model architecture}
+Each party $i$ uses a \texttt{BottomModel}: \texttt{Linear} $\to$ ReLU $\to$ \texttt{BatchNorm1d} $\to$ \texttt{Linear} to embedding dimension $d_e{=}32$ (default in Part~2/3). The \texttt{TopModel} maps $\mathbb{R}^{K\cdot d_e}$ to a scalar logit with a similar two-layer MLP (hidden width 64). Activations are ReLU with batch norm. The global objective is binary cross-entropy. Optimizer: Adam with learning rate $10^{-3}$ for standard training in Part~3; Part~2's Algorithm~6 demo used $10^{-2}$ for faster convergence in the entanglement experiment cell.
+
+\subsection{VFL training procedure}
+Training proceeds in mini-batches. For each batch, parties compute embeddings $e_i = f_{\theta_i}(x^{(i)})$; the active party concatenates $[e_0,\ldots,e_{K-1}]$ and computes loss $\ell(\hat{y}, y)$. Backpropagation updates all $\theta_i$ and $\theta_a$. Part~2 optionally stores embedding histories $\{E_i^t\}$ for distillation-based unlearning, following the spirit of VFU-KD~\cite{varshney2025vfu}.
+
+\subsection{Base unlearning procedure (for verification experiments)}
+\texttt{Part\_1.ipynb} trains a two-party VFL model, selects a forget subset (e.g., 5\% of training indices for sample unlearning), and applies \textbf{gradient ascent} on the forget set as in VFU-GA-style unlearning unless a different cell is executed. The goal of E-VFU is \emph{not} to invent a new unlearning rule but to \textbf{audit} the outcome. A separate notebook (\texttt{Part3.ipynb}) implements additional unlearning baselines (VFU-KD, VFU-FT, retrain) for extended benchmarking; we do not center those experiments in this report.
+
+\subsection{Threat model (Phase~1 verification)}
+We evaluate unlearning under an \emph{internal auditor} threat model that upper-bounds many realistic adversaries. The auditor observes the trained VFL system and can (i) query the model on chosen inputs to obtain output probabilities/logits, (ii) access per-sample losses, and (iii) in the strongest setting, access \emph{white-box} gradients of the loss with respect to model parameters and intermediate representations (needed for Grad-MIA and parts of FUMA). We assume the auditor knows which samples are in the forget set $\mathcal{I}_f$ for evaluation, but does not have raw features across all parties unless operating in the centralized simulator. Shadow-model meta attacks additionally assume the auditor can train auxiliary VFL models on the same data distribution (a standard but strong assumption for worst-case auditing~\cite{shokri2017mia}).
+
+\subsection{Evaluation protocol and metrics}
+For each dataset, we build a train/test split (80/20, seed 42) and define a forget subset $\mathcal{I}_f$ as a fixed ratio of the training indices (default 5\%). We report \textbf{utility} on the held-out test set (accuracy, F1, AUC), and \textbf{forgetting evidence} via the Phase~1 battery:
+(i) Output-MIA membership probability and AUC; (ii) Grad-MIA membership probability and AUC; (iii) FUMA-Canary summary statistics of $\Delta_{\mathrm{pred}}$ on canary probes; (iv) FUMA-Detector detection rate (fraction of forget samples with detector score $>0.5$); and (v) shadow-model meta separation (AUC or probability of being classified as ``full-data''). For all membership-style scores, values near 0.5 indicate chance-level distinguishability (desirable), while higher separability suggests residual traces.
+
+\subsection{E-VFU Part~1 --- Verification component A: Output-based MIA (baseline)}
+This follows Varshney et al.: build features from forward-pass statistics (e.g., loss, confidence, margin). Train a binary attack model on members vs.\ hold-out non-members. After unlearning, report mean membership probability on forget-set samples; values near 0.5 indicate the attack cannot infer membership. We also report attack AUC where implemented.
+
+\subsection{E-VFU Part~1 --- Verification component B: Gradient-based MIA}
+Class \texttt{GradientBasedMIA} computes per-sample gradients through bottom and top models, extracts a fixed-dimensional feature vector per sample (layer-wise norms, spectral summaries, sparsity, gradient statistics, etc.), and trains a Random Forest attacker. \texttt{ComprehensiveUnlearningVerifier.run\_comprehensive\_verification} compares output-based vs.\ gradient-based attack AUC and ``unlearning effectiveness'' (membership scores on unlearned samples). Gradient snapshots \emph{before} and \emph{after} unlearning support \textbf{gradient change magnitude} analysis ($\|g\|$ differences), quantifying optimization-space shift even when logits appear stable.
+
+\subsection{E-VFU Part~1 --- Verification component C: FUMA (Forensic Unlearning Membership Attack)}
+FUMA tests a different failure mode than standard MIA: rather than predicting ``member vs.\ non-member'' from a \emph{single} model snapshot, it asks whether a point exhibits a \emph{before$\to$after} fingerprint indicative of incomplete or unstable unlearning. We implement two complementary FUMA variants drawn from \texttt{VFL\_Unlearning\_Project.ipynb} and \texttt{part4.ipynb}.
+
+\textbf{FUMA-Canary.} We generate synthetic \emph{canary} probes (e.g., feature-wise extreme values, local-noise perturbations, and interpolations) and compute prediction divergence
+\begin{equation}
+  \Delta_{\mathrm{pred}}(x) \;=\; \bigl|p_{\mathrm{before}}(y{=}1\mid x) - p_{\mathrm{after}}(y{=}1\mid x)\bigr|.
+\end{equation}
+Large, systematic shifts on canaries suggest unstable forgetting dynamics. This probe does not require training an external classifier; it is a direct behavioural audit.
+
+\textbf{FUMA-Detector.} In \texttt{part4.ipynb} we compute an 8-D forensic feature vector from before/after differences (loss and confidence shifts; gradient-stability proxies). A lightweight detector (logistic regression in the notebook implementation) is trained to separate forget-set vs.\ retained samples. We report \textbf{FUMA detection rate} (fraction of forget samples with detector score $>0.5$; lower is better) and the average forget score. In \texttt{VFL\_Unlearning\_Project.ipynb}, the same idea appears as \texttt{train\_fuma\_detector} with detector AUC and feature-importance plots.
+
+\subsection{E-VFU Part~1 --- Verification component D: Shadow model attack}
+Class \texttt{ShadowModelAttack} trains multiple \textbf{shadow} VFL models: half on \textbf{retain-only} data, half on \textbf{full} (retain $+$ target) data, mirroring Shokri-style methodology adapted to VFL. It extracts a feature vector from each trained model's parameters (weight statistics across bottom/top modules). A \textbf{meta-classifier} (e.g., Random Forest or MLP) learns to predict which training distribution produced a model. The unlearned model is embedded in this feature space; we report \textbf{Shadow MI AUC}. Interpreting success: AUC $\approx 0.5$ means the meta-classifier cannot tell unlearned vs.\ retain-only shadow models (desired); AUC $\gg 0.5$ means persistent ``full-data'' fingerprints. The attack targets the \textbf{model as a whole}, not only per-sample logits.
+
+\subsection{Unified E-VFU dashboard}
+When cells are run in order, \texttt{Part\_1.ipynb} can aggregate Output MIA, Gradient MIA, FUMA detection rate, and Shadow MI AUC into a single comparison table for defense slides.
+
+\subsection{Part~2 --- Cross-party feature entanglement ($\rho$)}
+For target party $k$ and receiver party $j$, we form a batch-averaged Jacobian linking $k$'s input features to $j$'s hidden activations (implementation uses the computational graph through the active model). Truncated SVD with rank $r{=}10$ yields singular values $\sigma_1,\ldots,\sigma_r$. Define
+\begin{equation}
+  \rho_{k\to j} \;=\; \frac{\sigma_1}{\sqrt{\sum_{i=1}^{r}\sigma_i^2 + \varepsilon}}.
+\end{equation}
+Thresholds $\tau_{\mathrm{low}}{=}0.15$, $\tau_{\mathrm{high}}{=}0.40$ map $\rho$ to \textsc{low/medium/high} risk bands (design defaults from project documentation; empirically many trained models exceed $\tau_{\mathrm{high}}$ strongly, suggesting recalibration per architecture).
+
+\subsection{Entanglement-aware passive-party unlearning (Algorithm~6 sketch)}
+\begin{enumerate}[leftmargin=*]
+  \item Run party-level $\rho$ diagnosis for target party $k$ vs.\ all $j\neq k$.
+  \item Partition parties into safe, monitor, and retrain sets by risk band; execute VFU-KD-style passive-party unlearning on the top (and associated modules as coded).
+  \item For high-risk parties, run short local retraining epochs with learning rate $\eta_2$; monitor medium-risk parties for accuracy drops $>\delta_{\mathrm{monitor}}$.
+\end{enumerate}
+
+\subsection{How Parts 1--3 overlap and differ}
+Table~\ref{tab:partcompare} contrasts scope. \textbf{Important:} metrics from two-party and four-party runs are \emph{not} directly comparable as identical federated scenarios; we interpret them as complementary evidence.
+
+\begin{table*}[t]
+  \caption{Comparison of notebook parts (Part~4 excluded from this report).}
+  \label{tab:partcompare}
+  \centering
+  \small
+  \begin{tabular}{@{}p{0.14\linewidth}p{0.18\linewidth}p{0.26\linewidth}p{0.34\linewidth}@{}}
+    \toprule
+    Part & Parties & Core unlearning / analysis & Primary outputs \\
+    \midrule
+    1 & 2 & E-VFU: GA unlearning + 4 verification attacks & Output/Gradient MIA, FUMA rate, Shadow MI AUC, $\Delta$grad \\
+    2 & 4 & Jacobian $\rho$ (Alg.~5), entanglement-aware KD (Alg.~6--7) & $\rho$ bars, risk bands, utility before/after \\
+    3 & 4 & (Supp.) GA/KD/FT/retrain benchmarks & Extended tables; optional cross-check for $\Delta\rho$ \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\section{Results and Discussion}
+\label{sec:results}
+
+\subsection{Part~1 (E-VFU): Multi-attack verification on UCI Adult}
+Metrics below come from \texttt{Part\_1.ipynb} after VFU-style gradient-ascent unlearning on a 5\% forget set. Post-unlearning \textbf{test utility}: \textbf{accuracy 0.828}, \textbf{F1 0.673}, \textbf{AUC 0.895}.
+
+\textbf{Output-based vs.\ gradient-based MIA.} Mean membership probability on unlearned samples was \textbf{50.15\%} (output) and \textbf{49.77\%} (gradient). Attack AUC was \textbf{0.551} vs.\ \textbf{0.489}; the gradient RF attack showed \textbf{99\%} train / \textbf{47\%} test accuracy (overfitting). Mean absolute gradient change $\approx$\textbf{28.1}; mean relative change $\approx$\textbf{46.6\%}.
+
+\textbf{FUMA (forensics).} The forensic detector flags forget samples at a high rate (\textbf{63.5\%} in our logged run; target $<$5\% in notebook guidelines), indicating a strong before/after fingerprint despite near-chance membership scores under Output-/Grad-MIA. This disagreement supports the central motivation of E-VFU: \emph{single-metric audits can be misleading}.
+
+\textbf{Shadow model attack.} With \textbf{5} shadows per side, meta-classifier training accuracy \textbf{1.00}; \textbf{Shadow MI AUC $=$ 1.000}---strong separation of retain-only vs.\ full-data shadow models; the unlearned model lies on the ``wrong'' side of this test relative to ideal indistinguishability.
+
+Table~\ref{tab:evfu} summarizes. \textbf{Takeaway:} output/gradient MIA means near 0.5 do \emph{not} imply robust unlearning; FUMA and shadow attacks surface residual artifacts, aligning with the E-VFU motivation in \texttt{evfu\_presentation.tex}.
+
+\begin{figure*}[t]
+  \centering
+  \begin{subfigure}[t]{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{presentation_figures/01_gradient_mia_comparison.png}
+    \caption{Output- vs.\ gradient-based MIA.}
+    \label{fig:gradmia}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{presentation_figures/03_fuma_results.png}
+    \caption{FUMA forensic verification.}
+    \label{fig:fuma}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{presentation_figures/05_shadow_attack_results.png}
+    \caption{Shadow-model meta attack.}
+    \label{fig:shadow}
+  \end{subfigure}
+  \caption{E-VFU Part~1 verification plots extracted from \texttt{VFL\_Unlearning\_Project.ipynb}/\texttt{Part\_1.ipynb}. These complement Table~\ref{tab:evfu}: weak MIAs can look near-chance while stronger probes (FUMA/shadow) still detect residual artifacts.}
+  \label{fig:evfu-plots}
+\end{figure*}
+
+\begin{table*}[t]
+  \caption{E-VFU verification signals on UCI Adult (\texttt{Part\_1.ipynb}).}
+  \label{tab:evfu}
+  \centering
+  \small
+  \begin{tabular}{@{}p{0.28\linewidth}p{0.20\linewidth}p{0.44\linewidth}@{}}
+    \toprule
+    Attack / audit & Key number & Note \\
+    \midrule
+    Output MIA & Mem.\ prob.\ $\sim$50\%; AUC 0.551 & Baseline; AUC $>$ 0.5 $\Rightarrow$ some separability \\
+    Gradient MIA & Mem.\ prob.\ $\sim$50\%; AUC 0.489 & RF generalizes poorly; $\Delta$grad still large \\
+    FUMA (detector) & Detection \textbf{63.5\%} & Far above $<$5\% ``excellent'' guideline in notebook \\
+    Shadow meta-classifier & Shadow MI AUC \textbf{1.00} & Perfect separation of shadow families (undesired for stealth) \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\subsection{Cross-dataset evidence (4 datasets, \texttt{part4.ipynb})}
+To test whether verification signals generalize beyond a single benchmark, we also ran a unified experiment harness on \textbf{four} tabular datasets: Adult, German Credit, Bank Marketing, and Credit Card Default. The harness trains a baseline VFL model and evaluates multiple unlearning strategies (GA, KD, FT, retrain) with a consistent verification battery (Output-MIA, Grad-MIA, FUMA, shadow). Figure~\ref{fig:cross-dataset-heatmap} summarizes cross-dataset verification signals in a single view; notably, different unlearning methods can look similar under one metric (e.g., MIA near chance) while diverging under forensic or shadow probes.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{Part4_figures/Heatmap_Cross_Dataset.png}
+  \caption{Cross-dataset verification summary across Adult, German, Bank Marketing, and Credit Card Default (from \texttt{part4.ipynb}).}
+  \label{fig:cross-dataset-heatmap}
+\end{figure}
+
+\subsection{Part~2: Jacobian feature entanglement (proposal \texttt{ML372.pdf})}
+Party-level $\rho$ for $P_1\!\to\!P_0,P_2,P_3$ on Adult was \textbf{0.97--0.99} (\textsc{high}). This matches the submitted slides: cross-party Jacobians $\partial h_j^{(l)}/\partial X_k$ with truncated SVD and $\rho=\sigma_1/\|\Sigma\|_F$ reveal \emph{concentrated} coupling---remaining parties risk collateral damage if $P_1$ unlearns blindly.
+
+\textbf{Algorithm~6.} Entanglement-aware passive-party unlearning with retraining of $\{P_0,P_2,P_3\}$ changed metrics from \textbf{0.8579 / 0.6932 / 0.9115} to \textbf{0.8543 / 0.6904 / 0.9083} (acc / F1 / AUC). \textbf{Algorithm~7} (feature-level) is implemented in \texttt{Part\_2.ipynb} with helper ordering constraints.
+
+\subsection{Supplementary benchmarks (\texttt{Part3.ipynb})}
+Extended GA/KD/FT/retrain comparisons (with $\Delta\rho$ telemetry) support the same qualitative conclusions: FT is typically utility-preserving while unconstrained GA can be destructive. We omit full benchmark tables to stay within the page limit; the notebooks contain the complete numeric logs.
+
+\subsection{Entanglement dynamics (\texorpdfstring{$\Delta\rho$}{Delta rho} and gradient probes)}
+On Adult, baseline party-level $\rho$ for edges from $P_1$ was already near saturation ($\approx$0.98--0.99). Post-unlearning, $\Delta\rho$ was \textbf{positive} for GA, KD, and FT (typical $+0.005$ to $+0.02$), indicating increased concentration of singular mass in the dominant direction. Sample-level mean gradient norms on fixed probes rose sharply for GA/KD ($\Delta \approx +6$ to $+9$) but only modestly for FT ($\approx +0.19$). On German Credit, some edges saw $\Delta\rho$ up to $\approx +0.14$ under GA, even when test AUC remained in the mid-0.7 range.
+
+\textbf{Interpretation.} $\rho$ and gradient probes surface \emph{representation stress} during unlearning. Utility-preserving FT aligns with smaller gradient-norm shifts, while destructive GA aligns with large shifts. The fact that $\rho$ can increase even when MIA scores look acceptable cautions against relying on a single audit metric.
+
+\subsection{Ethical and deployment considerations}
+Centralized simulation overestimates what real parties can compute or share. Jacobian factors may require trusted aggregators or secure multiparty computation in production. High $\rho$ should trigger governance review (which passive parties must retrain, compensation for compute), not automatic denial of deletion requests. MIAs themselves can be abused; we use them only as internal audits.
+
+\subsection{Limitations and threats to validity}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Simulation fidelity:} No network latency, no encryption, no non-IID party dropouts.
+  \item \textbf{Splits:} Random vertical splits do not reflect realistic bank--merchant feature allocation.
+  \item \textbf{Single-seed reporting:} German Credit especially needs multi-seed confidence intervals.
+  \item \textbf{Attack hyperparameters:} MIA and gradient attack models are not tuned to a threat model; AUCs are relative indicators.
+  \item \textbf{Thresholds $\tau_{\mathrm{low}},\tau_{\mathrm{high}}$:} Saturated $\rho$ values suggest log-scale or percentile-based bands for future work.
+\end{itemize}
+
+\subsection{Reproducibility}
+Seeds, batch size (512 in key cells), optimizers, and epoch counts are fixed in notebooks. Part~3 writes figures under \texttt{Part3\_figures/}. Runtime was CPU-oriented in logs (tens of seconds per Adult experiment).
+
+\section{Conclusion}
+\label{sec:conclusion}
+We presented \textbf{E-VFU}, a multi-attack verification framework for vertical federated unlearning that augments output-only MIA baselines~\cite{varshney2025vfu} with \textbf{Grad-MIA}, \textbf{FUMA} (canary probe and forensic detector), and a \textbf{shadow-model meta attack} over parameter fingerprints. In our Adult run, Output-/Grad-MIA means on forget samples were near chance, yet \textbf{FUMA detection remained high (63.5\%)} and \textbf{Shadow MI AUC reached 1.00}, showing that stronger audits can contradict weaker ones. We also reported \textbf{cross-party Jacobian--SVD entanglement} ($\rho$) as an orthogonal diagnostic for party-level coupling, motivating entanglement-aware mitigation when unlearning affects passive parties.
+
+\textbf{Future work:} calibrate shadow/FUMA detectors to avoid meta-classifier overfitting; privacy-preserving Jacobian estimation for Part~2; multi-seed confidence intervals; improved KD schedules; credential-gated healthcare runs (MIMIC scaffolding in Part~1).
+
+\begin{acks}
+Replace with advisor or course acknowledgments.
+\end{acks}
+
+\bibliographystyle{ACM-Reference-Format}
+\begin{thebibliography}{99}
+
+\bibitem{varshney2025vfu}
+P.~Varshney et al.
+\newblock Unlearning Clients, Features and Samples in Vertical Federated Learning.
+\newblock \emph{Proc.\ Privacy Enhancing Technologies} (PETS), 2025.
+\newblock \url{https://arxiv.org/abs/2501.13683}
+
+\bibitem{yang2019federated}
+Q.~Yang, Y.~Liu, T.~Chen, and Y.~Tong.
+\newblock Federated Machine Learning: Concept and Applications.
+\newblock \emph{ACM TIST} 10(2), 2019.
+
+\bibitem{bourtoule2021sisa}
+L.~Bourtoule et al.
+\newblock Machine Unlearning.
+\newblock IEEE Symposium on Security and Privacy, 2021.
+
+\bibitem{liu2021federaser}
+Y.~Liu et al.
+\newblock FedEraser: Enabling Customers to Erase Their Data from Federated Learning Models.
+\newblock IEEE/ACM Transactions on Networking, 2021.
+
+\bibitem{wang2025certified}
+Y.~Wang and Y.~Wang.
+\newblock Forgetting Any Data at Any Time: A Theoretically Certified Unlearning Framework for Vertical Federated Learning.
+\newblock arXiv:2502.17081, 2025.
+
+\bibitem{laser2025}
+Y.~Sun et al.
+\newblock Vertical Federated Learning with Missing Features During Training and Inference.
+\newblock ICLR, 2025.
+
+\bibitem{shokri2017mia}
+R.~Shokri et al.
+\newblock Membership Inference Attacks Against Machine Learning Models.
+\newblock IEEE Symposium on Security and Privacy, 2017.
+
+\bibitem{salem2018ml_leaks}
+A.~Salem et al.
+\newblock ML-Leaks: Model and Data Independent Membership Inference Attacks and Defenses on Machine Learning Models.
+\newblock NDSS, 2019.
+
+\bibitem{sensfl_cmse}
+SensFL (Jacobian-based VFL privacy).
+\newblock CMES, 2025 (see project literature survey).
+
+\bibitem{oymak2019jacobian}
+S.~Oymak and M.~Soltanolkotabi.
+\newblock Generalization Guarantees for Neural Networks via Harnessing the Low-rank Structure of the Jacobian.
+\newblock arXiv:1906.05392, 2019.
+
+\bibitem{kohavi1996adult}
+R.~Kohavi and B.~Becker.
+\newblock UCI Machine Learning Repository: Adult Data Set, 1996.
+
+\bibitem{hofmann1994german}
+H.~Hofmann.
+\newblock Statlog (German Credit Data), UCI Repository, 1994.
+
+\bibitem{guo2019certified}
+C.~Guo, T.~Goldstein, A.~Hannun, and L.~van der Maaten.
+\newblock Certified Data Removal from Machine Learning Models.
+\newblock ICML, 2020.
+
+\bibitem{mcmahan2017fedavg}
+B.~McMahan, E.~Moore, D.~Ramage, S.~Hampson, and B.~A.~y Arcas.
+\newblock Communication-Efficient Learning of Deep Networks from Decentralized Data.
+\newblock AISTATS, 2017.
+
+\bibitem{geiping2020inverting}
+J.~Geiping, H.~Bauermeister, H.~Dr{\"o}ge, and M.~Moeller.
+\newblock Inverting Gradients---How Easy Is It to Break Privacy in Federated Learning?
+\newblock NeurIPS, 2020.
+
+\bibitem{nasr2019privacy}
+M.~Nasr, R.~Shokri, and A.~Houmansadr.
+\newblock Comprehensive Privacy Analysis of Deep Learning.
+\newblock IEEE Symposium on Security and Privacy, 2019.
+
+\bibitem{carlini2021extracting}
+N.~Carlini et al.
+\newblock Extracting Training Data from Large Language Models.
+\newblock USENIX Security, 2021.
+
+\bibitem{tarun2023deep}
+I.~Tarun et al.
+\newblock Deep Regression Unlearning.
+\newblock ICML, 2023.
+
+\bibitem{nguyen2022survey}
+T.~D.~Nguyen, T.~Nguyen, P.~Liew, W.~Ong, and D.~Phung.
+\newblock A Survey of Machine Unlearning.
+\newblock arXiv:2209.02299, 2022.
+
+\end{thebibliography}
+
+\end{document}

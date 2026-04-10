@@ -1,0 +1,5 @@
+\beamer@sectionintoc {1}{(a) Problem definition}{3}{0}{1}
+\beamer@sectionintoc {2}{(b) Dataset and analysis (statistics)}{6}{0}{2}
+\beamer@sectionintoc {3}{(c) Proposed solution (architecture)}{8}{0}{3}
+\beamer@sectionintoc {4}{(d) Loss function and intuition}{12}{0}{4}
+\beamer@sectionintoc {5}{(e) Performance report}{16}{0}{5}

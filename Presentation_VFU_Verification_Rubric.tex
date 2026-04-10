@@ -1,0 +1,162 @@
+% Course project presentation: rubric sections (a)--(g)
+% Base paper: Varshney et al., PETS 2025 (VFU-KD / VFU-GA) — align with Part_1.ipynb & Part_2.ipynb
+% Optional figures: place PNGs in ./presentation_figures/ (same as evfu_presentation.tex)
+\documentclass[11pt,aspectratio=169]{beamer}
+\usetheme{Madrid}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}[frame number]
+\setbeamersize{text margin left=0.9cm,text margin right=0.9cm}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\graphicspath{{./presentation_figures/}{./}}
+
+\title{Verification Framework for Vertical Federated Unlearning (VFU)}
+\subtitle{Building on PETS 2025 (Varshney et al.) --- E-VFU-style multi-attack auditing}
+\author{}
+\institute{ML Project --- \texttt{Part\_1.ipynb}, \texttt{Part\_2.ipynb}}
+\date{}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+  \vspace{-0.5em}
+  \footnotesize\textit{Target length: $\sim$8 min talk + 2 min Q\&A. This deck maps one-to-one to required rubric items (a)--(g).}
+\end{frame}
+
+%==============================================================================
+\section*{(a) Problem definition}
+\begin{frame}{(a) Problem definition}
+  \begin{itemize}
+    \item \textbf{Regulatory need:} Right to erasure (e.g., GDPR) requires removing influence of withdrawn data from \emph{trained models}, not only from databases.
+    \item \textbf{Vertical FL (VFL):} Parties hold \textbf{different features} for the \textbf{same sample IDs}; only embeddings (or gradients) are shared. Unlearning may mean removing a party, a feature set, or specific samples.
+    \item \textbf{VFU methods (PETS 2025):} Varshney et al.\ propose \textbf{VFU-KD} (knowledge distillation) and \textbf{VFU-GA} (gradient ascent) for client / feature / sample unlearning in VFL.
+    \item \textbf{Our focus:} A \textbf{verification framework}: how do we \emph{audit} whether unlearning actually removed the target signal, beyond naive accuracy checks?
+    \item \textbf{Gap:} Output-only membership inference (MIA) is a weak auditor; gradients, forensic probes, and model-level tests can reveal residual leakage even when logits look ``fine.''
+  \end{itemize}
+\end{frame}
+
+%==============================================================================
+\section*{(b) Dataset \& statistics}
+\begin{frame}{(b) Dataset and analysis (statistics)}
+  \textbf{Sources implemented in the notebooks (after cleaning / encoding):}
+  \vspace{0.3em}
+  \begin{center}
+    \small
+    \begin{tabular}{@{}lrrp{5.2cm}@{}}
+      \toprule
+      \textbf{Dataset} & \textbf{Samples} & \textbf{Features} & \textbf{Target / imbalance} \\
+      \midrule
+      UCI Adult & 30{,}162 & 14 & Income $>$50K: 7{,}508 positive vs.\ 22{,}654 negative ($\sim$25\% minority) \\
+      German Credit & 1{,}000 & 20 & Good credit: 700 vs.\ bad: 300 (70/30) \\
+      MIMIC-III & --- & --- & Full pipeline reserved; demo uses 46K synthetic placeholder if no credentialed path \\
+      \bottomrule
+    \end{tabular}
+  \end{center}
+  \vspace{0.4em}
+  \begin{itemize}
+    \item Categorical columns label-encoded; Adult rows with missing values dropped.
+    \item \textbf{VFL split:} feature columns partitioned across 2 (or 3) parties; one \textbf{active} party holds labels (binary classification).
+    \item Features standardized per party; train/validation/test splits with fixed seed (e.g., 42) for reproducibility.
+  \end{itemize}
+\end{frame}
+
+%==============================================================================
+\section*{(c) Proposed solution --- architecture}
+\begin{frame}{(c) Proposed solution: architecture}
+  \textbf{Phase 0 --- VFL + unlearning (PETS-style, as in code)}
+  \begin{itemize}
+    \item \textbf{Bottom models:} Each passive party: MLP encoder maps local features $\to$ embedding.
+    \item \textbf{Top model (active party):} Concatenated embeddings $\to$ MLP $\to$ binary logit; trained with \texttt{BCELoss}.
+    \item \textbf{VFU-KD (passive party / feature removal):} New student modules trained with \textbf{prediction loss + distillation} from frozen teacher (see loss slide).
+    \item \textbf{VFU-GA (sample unlearning):} Short gradient-ascent phases on target samples to suppress their influence (fast but may hurt utility).
+  \end{itemize}
+  \vspace{0.35em}
+  \textbf{Phase 1 --- Verification (E-VFU-style, \texttt{Part\_1.ipynb})}
+  \begin{itemize}
+    \item \textbf{(1)} Output-based MIA (baseline, as in PETS evaluation).
+    \item \textbf{(2)} Gradient-based MIA: membership classifier on gradient norms / layer stats / spectral cues (Random Forest).
+    \item \textbf{(3)} FUMA-style forensic checks: canary samples, prediction divergence.
+    \item \textbf{(4)} Shadow models + meta-classifier: does the unlearned model resemble ``trained on retain-only'' vs.\ ``full data''?
+  \end{itemize}
+\end{frame}
+
+%==============================================================================
+\section*{(d) Loss function}
+\begin{frame}{(d) Loss function and intuition}
+  \textbf{Standard VFL training (active top)}
+  \[
+    \mathcal{L}_{\text{train}} = \mathrm{BCE}(\hat{y}, y).
+  \]
+  \textbf{VFU-KD passive-party unlearning (\texttt{Part\_2.ipynb})}
+  \begin{itemize}
+    \item Student top $\theta_a'$ sees embeddings \textbf{without} the removed party; teacher is the original top model.
+    \item Per batch:
+    \[
+      \mathcal{L} = (1-\lambda)\,\underbrace{\mathrm{BCE}(y_{\text{student}}, y)}_{\mathcal{L}_{\text{pred}}}
+      + \lambda\,\underbrace{\mathrm{KL}(p_{\text{student}}\ \|\ p_{\text{teacher}})}_{\mathcal{L}_{\text{dist}}}.
+    \]
+    \item Default $\lambda = 0.3$: balance \textbf{fitting true labels} on the retain set with \textbf{mimicking the old decision boundary} so utility is preserved while the removed party's features are absent.
+    \item \textbf{Feature unlearning} on passive side: KL between student and teacher \textbf{embeddings} (distribution match in representation space).
+    \item \textbf{VFU-GA intuition:} Ascend on loss for target samples to ``unmemorize'' them; fast but coarser than KD.
+  \end{itemize}
+\end{frame}
+
+%==============================================================================
+\section*{(e) Performance report}
+\begin{frame}{(e) Performance report}
+  \textbf{Representative numbers from notebook runs (UCI Adult, may vary slightly with rerun)}
+  \begin{itemize}
+    \item After VFL training ($\sim$50 epochs): accuracy $\approx$ \textbf{0.85}, F1 $\approx$ \textbf{0.69--0.70}, ROC-AUC $\approx$ \textbf{0.91}.
+    \item Pre-unlearning evaluation: e.g.\ Acc $\approx$ 0.858, F1 $\approx$ 0.693, AUC $\approx$ 0.912 (logged in \texttt{Part\_2.ipynb}).
+    \item \textbf{VFU-KD unlearning:} Total loss $\approx$ 0.25 after 30 epochs with $\mathcal{L}_{\text{pred}}\approx 0.34$, $\mathcal{L}_{\text{dist}}\approx 0.04$ (illustrative run); bar charts compare metrics before vs.\ after unlearning.
+    \item \textbf{Verification metrics:} Report AUC of MIA ($\to$ 0.5 desired), FUMA detection rate ($\to$ low), shadow-model probability of ``full-data'' model ($\to$ $<0.5$), and combined pass/fail dashboard (\texttt{presentation\_figures/} if generated).
+  \end{itemize}
+  \vspace{0.3em}
+  \footnotesize Replace with your latest run outputs when presenting; keep one slide as the ``headline'' metrics and move plots to backup slides if needed.
+\end{frame}
+
+%==============================================================================
+\section*{(f) Comparison with state of the art}
+\begin{frame}{(f) Comparison with state-of-the-art methods}
+  \small
+  \textbf{Horizontal FL unlearning (context)} --- FedEraser, SISA, FedRecover, KNOT, FRU: focus on \textbf{sample} removal with different storage/retrain trade-offs; not the same data geometry as VFL.
+
+  \vspace{0.35em}
+  \textbf{Vertical FL unlearning (closer baseline)}
+  \begin{center}
+    \begin{tabular}{@{}llp{5.5cm}@{}}
+      \toprule
+      \textbf{Work} & \textbf{Mechanism} & \textbf{Contrast to our project} \\
+      \midrule
+      VFU-LR (Deng et al.) & Constraint-based & Efficiency vs.\ retraining; different algorithmic family. \\
+      Few-shot label unlearning (Gu et al.) & Mixup + GA & Label-side focus; we follow PETS-style VFU-KD/GA. \\
+      \textbf{Varshney et al.\ (PETS 2025)} & \textbf{VFU-KD / VFU-GA} & \textbf{Our base:} we implement and \textbf{extend evaluation} with stronger verification. \\
+      Certified VFL unlearning (Wang \& Wang) & Certified removal & Theoretical guarantees; we focus on empirical auditing. \\
+      \bottomrule
+    \end{tabular}
+  \end{center}
+  \vspace{0.3em}
+  \textbf{Our contribution:} Not a new unlearning rule, but a \textbf{multi-attack verification stack} to stress-test whether PETS-style VFU actually hides membership and forensic traces.
+\end{frame}
+
+%==============================================================================
+\section*{(g) Challenges \& discussion}
+\begin{frame}{(g) Challenges / discussion}
+  \begin{itemize}
+    \item \textbf{Evaluator strength:} Stronger MIAs (including gradient-based and unlearning-specific attacks) can contradict a ``pass'' from output-only MIA alone --- verification must match the threat model.
+    \item \textbf{Utility--privacy trade-off:} VFU-GA is fast but can degrade accuracy; VFU-KD needs historical embeddings / teacher access and more epochs.
+    \item \textbf{Correlated features across parties:} Removing one party's column may not remove all signal if correlated proxies exist in other parties' views.
+    \item \textbf{Scale \& deployment:} Real VFL adds secure aggregation, async parties, and credentialled data (MIMIC); the notebooks use public UCI data for reproducibility.
+    \item \textbf{Future work:} Iterative unlearning sequences, communication cost under SMPC, and tighter alignment with certified unlearning theory.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Thank you}
+  \centering
+  \Large Questions?
+\end{frame}
+
+\end{document}

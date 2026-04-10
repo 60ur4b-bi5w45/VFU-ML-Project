@@ -1,0 +1,146 @@
+% ML372 / course final report — ACM sigconf (double column)
+% Template basis: ACM Primary Article Template (acmart sigconf), e.g. Overleaf wbvnghjbzwpc
+% Compile: pdflatex Project_Report.tex && bibtex Project_Report && pdflatex x2
+% Requires: acmart TeX package (install via TeX Live / MiKTeX)
+
+\documentclass[sigconf,screen]{acmart}
+
+%% Course / draft — adjust or remove for submission elsewhere
+\setcopyright{none}
+\copyrightyear{2026}
+\acmYear{2026}
+\acmDOI{}
+\acmISBN{}
+
+%% Title and authors — REPLACE with your names and IDs
+\title{Multi-Attack Verification for Vertical Federated Unlearning}
+\subtitle{An Empirical Framework Built on Knowledge Distillation and Gradient-Based Unlearning}
+
+\author{Author One}
+\orcid{0000-0000-0000-0000}
+\affiliation{%
+  \institution{Your University}
+  \city{City}
+  \country{Country}}
+\email{author1@university.edu}
+
+\author{Author Two}
+\affiliation{%
+  \institution{Your University}
+  \city{City}
+  \country{Country}}
+\email{author2@university.edu}
+
+\renewcommand{\shortauthors}{Author One and Author Two}
+
+\begin{CCSXML}
+<ccs2012>
+ <concept>
+  <concept_id>10010147.10010257</concept_id>
+  <concept_desc>Computing methodologies~Machine learning</concept_desc>
+  <concept_significance>500</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>10002978.10003029</concept_id>
+  <concept_desc>Security and privacy~Privacy protections</concept_desc>
+  <concept_significance>300</concept_significance>
+ </concept>
+</ccs2012>
+\end{CCSXML}
+\ccsdesc[500]{Computing methodologies~Machine learning}
+\ccsdesc[300]{Security and privacy~Privacy protections}
+
+\keywords{vertical federated learning, machine unlearning, membership inference, knowledge distillation, verification}
+
+\begin{document}
+
+\begin{abstract}
+Regulations such as the GDPR motivate \emph{machine unlearning}: removing the influence of withdrawn data from trained models. In \emph{vertical} federated learning (VFL), parties hold disjoint feature sets for the same entities, which complicates both unlearning and auditing. Recent work introduces practical VFL unlearning via knowledge distillation and gradient ascent (\textsc{VFU-KD} / \textsc{VFU-GA}) and evaluates privacy partly through output-based membership inference attacks (MIAs). We implement this VFL unlearning stack in PyTorch and augment evaluation with a \emph{multi-attack verification} pipeline: gradient-based MIA, forensic-style canary checks, and shadow-model meta-classification, alongside the original logit-based MIA baseline. Experiments on the UCI Adult and German Credit benchmarks show strong pre-unlearning utility; we discuss how stronger auditors can reveal residual leakage that weaker metrics miss, and we outline limitations and future work.
+\end{abstract}
+
+\maketitle
+
+%=============================================================================
+\section{Introduction}
+
+\subsection{Problem definition}
+Organizations increasingly train models on sensitive data spread across institutions. \emph{Vertical federated learning} (VFL) lets parties jointly learn a model when each party observes a different subset of features for the same sample identifiers, typically exchanging only intermediate representations or gradients rather than raw records~\cite{varshney2025vertical}. When a user exercises the right to erasure, or a party withdraws a feature column, the system should ensure that the joint model no longer reflects the withdrawn information---a problem known as \emph{(vertical) federated unlearning}.
+
+Naively retraining from scratch satisfies this goal but is often too costly. Approximate unlearning methods trade compute for weaker guarantees; in that regime, \emph{verification}---empirically testing whether unlearning succeeded under a stated threat model---becomes as important as the unlearning algorithm itself.
+
+\subsection{Literature review and gap}
+\textbf{Horizontal federated unlearning.} In horizontal FL, clients hold disjoint samples with shared features. Representative approaches include gradient subtraction with stored histories (FedEraser~\cite{liu2021federaser}), sharded retraining (SISA~\cite{bourtoule2021sisa}), and distillation-based recovery. These methods target a different data partition than VFL and are not directly applicable when the sensitive signal is split across feature columns.
+
+\textbf{Vertical federated unlearning.} Constraint-based and optimization-centric VFL unlearning has been proposed (e.g., VFU-LR~\cite{deng2023vfulr}; few-shot label unlearning~\cite{gu2024fewshot}). Varshney et al.~\cite{varshney2025vertical} study \textsc{VFU-KD}, which retrains a reduced student model using label supervision and distillation from a frozen teacher, and \textsc{VFU-GA}, which applies short gradient-ascent phases on target samples. Their evaluation includes output-based MIAs~\cite{shokri2017membership}.
+
+\textbf{Gap.} Output-only MIAs inspect final predictions or losses; gradients and internal representations can carry membership signal even when logits appear benign~\cite{geiping2020inverting}. Recent discussion in the unlearning literature stresses that \emph{stronger} auditors may contradict conclusions drawn from weak ones. Our work does not introduce a new unlearning algorithm; instead, we implement PETS-style \textsc{VFU-KD}/\textsc{VFU-GA} in a reproducible codebase and pair it with a \emph{multi-attack verification} layer to stress-test whether unlearning removes evidence of membership under progressively stronger assumptions.
+
+%=============================================================================
+\section{Materials and Methods}
+
+\subsection{Datasets and preprocessing}
+We use two public tabular benchmarks, loaded and encoded as in our Jupyter notebooks:
+\begin{itemize}
+  \item \textbf{UCI Adult} (income prediction): after dropping rows with missing values and label-encoding categoricals, we obtain \textbf{30{,}162} samples and \textbf{14} features. The positive class (income $>$\$50K) appears in \textbf{7{,}508} samples versus \textbf{22{,}654} negatives ($\sim$25\% minority).
+  \item \textbf{German Credit}: \textbf{1{,}000} samples, \textbf{20} features, binary target with \textbf{700} ``good'' and \textbf{300} ``bad'' credits.
+\end{itemize}
+We optionally reserve a pipeline slot for MIMIC-III; credentialed access is required for real ICU data, and our repository may use a synthetic placeholder for demonstration only. Features are standardized per party; we use stratified train/validation/test splits with fixed random seed (42) for reproducibility.
+
+\subsection{Vertical partition and model architecture}
+We simulate $K$ parties by partitioning feature columns. One \emph{active} party holds labels; passive parties contribute embeddings only. Each passive party uses a multi-layer perceptron (MLP) \emph{bottom} model mapping local features to a fixed embedding dimension. Embeddings are concatenated and fed to an MLP \emph{top} model that outputs a scalar logit for binary classification. Training minimizes binary cross-entropy (BCE) between predicted probabilities and labels.
+
+\subsection{Unlearning procedures}
+\textbf{\textsc{VFU-KD} (passive party removal).} Following~\cite{varshney2025vertical}, we train a \emph{student} top network that consumes embeddings from all parties except the removed party $P_u$. Let teacher probabilities be $p_t$ and student probabilities $p_s$. With distillation weight $\lambda \in [0,1]$,
+\begin{equation}
+  \mathcal{L}_{\text{KD}}
+  = (1-\lambda)\,\mathrm{BCE}(y, p_s) + \lambda\,\mathrm{KL}(p_s \,\|\, p_t).
+\end{equation}
+We use $\lambda=0.3$ by default and RAdam (or Adam) optimization for roughly 30 unlearning epochs, logging $\mathcal{L}_{\text{pred}}$, $\mathcal{L}_{\text{dist}}$, and total loss.
+
+\textbf{Feature unlearning (passive side).} For forgetting specific columns within a party, we train a student bottom encoder against a frozen teacher, minimizing KL divergence between embedding distributions (implemented via softmax over embedding dimensions per batch).
+
+\textbf{\textsc{VFU-GA} (sample unlearning).} We perform a small number of gradient-\emph{ascent} steps on the BCE loss restricted to a target subset (e.g., 5\% of training indices) to suppress memorization of those samples. This is fast but can degrade utility more than \textsc{VFU-KD}.
+
+\subsection{Verification pipeline}
+We evaluate unlearning with four complementary checks (see \texttt{Part\_1.ipynb}):
+\begin{enumerate}
+  \item \textbf{Output MIA (baseline):} attacker features derived from confidence, loss, or margin; we report ROC-AUC, targeting $\approx 0.5$ on unlearned samples (random guessing).
+  \item \textbf{Gradient-based MIA:} per-sample gradients yield norms, layer-wise norms, and simple spectral statistics; a Random Forest predicts membership. We compare AUC before/after unlearning and gradient magnitude shifts.
+  \item \textbf{Forensic / canary checks:} synthetic or held-out probe inputs to measure prediction divergence patterns associated with unlearning artifacts; we track heuristic detection rates (lower is better if unlearning hides traces).
+  \item \textbf{Shadow models:} train auxiliary models on retain-only versus full data; a meta-classifier predicts which regime a model came from. Successful unlearning should push the unlearned model toward the retain-only distribution (e.g., posterior on ``full'' below 0.5).
+\end{enumerate}
+
+\subsection{Implementation and training details}
+Code is in Python~3 with PyTorch. VFL pretraining typically runs for tens of epochs (e.g., 50 on Adult) with batch size 512 where memory allows. Hyperparameters (learning rates $\eta_1,\eta_2$ for unlearning phases, $\lambda$, epoch counts) match the constants documented in \texttt{Part\_2.ipynb}. Figures for the companion presentation are exported to \texttt{presentation\_figures/} when the full evaluation notebook is executed.
+
+%=============================================================================
+\section{Results and Discussion}
+
+\subsection{Predictive utility before and after unlearning}
+On UCI Adult, our VFL model reaches approximately \textbf{85\%} accuracy, \textbf{0.69--0.70} macro-F1, and \textbf{0.91} ROC-AUC on the held-out set after standard training---consistent with logged runs in the notebooks (exact digits may shift slightly across reruns). Pre-unlearning checkpoints show similar values (e.g., accuracy $\approx 0.858$, F1 $\approx 0.693$, AUC $\approx 0.912$ in one logged run).
+
+After \textsc{VFU-KD} passive-party unlearning for 30 epochs, we observe total loss near \textbf{0.25} with decomposition $\mathcal{L}_{\text{pred}} \approx 0.34$ and $\mathcal{L}_{\text{dist}} \approx 0.04$ (illustrative final epoch), indicating that distillation regularizes the student toward the teacher while still fitting labels on the retain set. Bar plots in the notebook compare accuracy, F1, and AUC before versus after unlearning; the expected pattern is a \emph{modest} utility drop when a party or feature is removed, with magnitude depending on the contribution of $P_u$.
+
+\subsection{Verification outcomes}
+Output-based MIA AUC often moves toward 0.5 after unlearning when logits lose membership signal for target samples. Gradient-based MIA can remain more discriminative if representation-level fingerprints persist; reporting both is therefore essential. FUMA-style and shadow-model tests provide orthogonal evidence: the former probes behavioral artifacts on canaries; the latter tests global similarity to models trained without the sensitive subset.
+
+\textbf{Discussion.} When stronger attacks fail while weaker ones ``pass,'' unlearning may still be inadequate against a capable adversary with gradient access. Conversely, if all auditors approach chance-level behavior on unlearned samples while utility on retain data stays acceptable, the evidence supports successful removal under the modeled threats. Our framework is intentionally modular so new attacks (e.g., adaptation-based MIAs) can be added as they appear in the literature.
+
+If you obtain \emph{improved} metrics after the class presentation, replace the numbers in this section with your latest tables and, if available, include figures such as \path{presentation_figures/06_comprehensive_verification.png}.
+
+%=============================================================================
+\section{Conclusion}
+
+We presented an empirical study of vertical federated unlearning built on PETS-style \textsc{VFU-KD} and \textsc{VFU-GA}, implemented on standard public benchmarks. The main contribution is a \emph{multi-attack verification} methodology that goes beyond output-based membership inference to include gradient-based, forensic, and shadow-model tests, better aligning evaluation with realistic leakage channels in federated pipelines.
+
+\textbf{Future work} includes (i) credentialed experiments on clinical data (MIMIC-III) with proper ethics review, (ii) iterative sequences of unlearning requests to study cumulative drift, (iii) communication and secure-aggregation overhead under cryptographic protocols, (iv) integration with certified or information-theoretic unlearning bounds where feasible, and (v) correlation-aware attacks when features are redundant across parties.
+
+%=============================================================================
+\begin{acks}
+We thank the course staff for feedback. Replace this text with acknowledgments as appropriate.
+\end{acks}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+\end{document}
